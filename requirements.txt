@@ -1,0 +1,22 @@
+# Core dependencies
+numpy
+pandas
+matplotlib
+Pillow
+opencv-python
+
+# Segmentation
+rembg
+
+# Deep Learning
+torch
+torchvision
+onnxruntime
+
+# Diffusion models
+diffusers
+transformers
+accelerate
+
+# Testing
+pytest

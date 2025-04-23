@@ -1,0 +1,47 @@
+# Git files
+.git
+.gitignore
+
+# Python virtual environment
+.venv/
+
+# IDE/Editor files
+.vscode/
+.idea/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Data and Results (usually mounted as volumes, not built into image)
+data/
+results/
+
+# Notebooks & Docs (unless specifically needed in the image)
+notebooks/
+docs/
+*.ipynb
+*.md
+
+# Test files
+tests/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+
+# Specific project files to exclude
+notebook.json
+[Challenge ML][Photo Studio] Descripción.txt
+[Challenge ML][Photo Studio] Dataset - Hoja 1.csv # Should be in data/metadata now
+metadata.csv # Should be in data/metadata now 
