@@ -16,7 +16,7 @@ __pycache__/
 *.bmp
 *.tiff
 *.ico
-
+*.json
 # C extensions
 *.so
 

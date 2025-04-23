@@ -171,10 +171,16 @@ class GenerationPipeline:
                 # Add other DiffusionGenerator params here if needed, fetching from self.config
              }
 
-             # Apply specific JSON overrides if provided
+             # Apply specific JSON overrides if provided, but remove num_inference_steps from initialization
              if diffusion_cfg_overrides:
                   logging.info(f"Applying diffusion overrides: {diffusion_cfg_overrides}") # Use logging
-                  final_diff_cfg.update(diffusion_cfg_overrides)
+                  # Create a copy of overrides without num_inference_steps for initialization
+                  init_overrides = {k: v for k, v in diffusion_cfg_overrides.items() if k != 'num_inference_steps'}
+                  final_diff_cfg.update(init_overrides)
+                  # Store num_inference_steps separately for use during generation
+                  self.diffusion_num_inference_steps = diffusion_cfg_overrides.get('num_inference_steps')
+             else:
+                  self.diffusion_num_inference_steps = None
 
              # Filter out None values as DiffusionGenerator might expect specific types
              final_diff_cfg_filtered = {k: v for k, v in final_diff_cfg.items() if v is not None}
@@ -394,7 +400,7 @@ class GenerationPipeline:
                      
                      # Get diffusion parameters from config
                      diff_params = {
-                         'num_inference_steps': self.config.get('diffusion_num_inference_steps', 30),
+                         'num_inference_steps': self.diffusion_num_inference_steps or self.config.get('diffusion_num_inference_steps', 30),
                          'guidance_scale': self.config.get('diffusion_guidance_scale', 7.5),
                          'controlnet_conditioning_scale': self.config.get('diffusion_controlnet_scale', 0.75)
                      }

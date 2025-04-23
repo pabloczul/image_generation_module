@@ -52,12 +52,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "diffusion_enabled": True,         # Enable diffusion background generation?
     # Default Diffusion Settings (can be overridden by diffusion_cfg)
     "diffusion_model_id": "runwayml/stable-diffusion-v1-5",
-    "diffusion_controlnet_model_id": "lllyasviel/control_v11p_sd15_inpaint", # Or other ControlNets
+    "diffusion_controlnet_model_id": "lllyasviel/sd-controlnet-seg", # Or other ControlNets
     "diffusion_device": "cuda",          # "cuda" if GPU available/configured
     "diffusion_processing_resolution": (512, 512), # Changed: Target size for diffusion (W, H)
-    "diffusion_num_inference_steps": 20,         # Changed from 25
+    "diffusion_num_inference_steps": 25,         # Changed from 25
     "diffusion_guidance_scale": 7.5,
-    "diffusion_controlnet_scale": 1.0,
+    "diffusion_controlnet_scale": 0.63,
     "diffusion_enable_cpu_offload": False, # If using GPU, offload when possible
     "diffusion_scheduler": "DDIM",      # Scheduler type (e.g., DDIM, UniPC)
 
