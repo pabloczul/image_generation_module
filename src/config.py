@@ -27,7 +27,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
     # --- Segmentation ---
     "segmenter_model": "u2net",         # Default rembg model (e.g., u2net, u2netp, silueta, isnet-general-use)
-    "segmentation_device": "cpu",       # Device for segmentation model ("cpu" or "cuda")
+    "segmentation_device": "cuda",       # Device for segmentation model ("cpu" or "cuda")
     "refine_mask": True,                # Apply morphological refinement?
     # Mask refinement parameters (applied if refine_mask is True)
     "mask_opening_kernel_size": 5,      # Kernel size for morphological opening (removes noise, must be positive odd)
@@ -47,20 +47,21 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "shadow_color": (0, 0, 0),          # Shadow color (RGB)
 
     # --- Background Generation ---
-    "diffusion_enabled": False,         # Enable diffusion background generation?
+    "diffusion_enabled": True,         # Enable diffusion background generation?
     # Default Diffusion Settings (can be overridden by diffusion_cfg)
     "diffusion_model_id": "runwayml/stable-diffusion-v1-5",
     "diffusion_controlnet_model_id": "lllyasviel/control_v11p_sd15_inpaint", # Or other ControlNets
-    "diffusion_device": "cpu",          # "cuda" if GPU available/configured
-    "diffusion_num_inference_steps": 25,
+    "diffusion_device": "cuda",          # "cuda" if GPU available/configured
+    "diffusion_processing_resolution": (512, 512), # Changed: Target size for diffusion (W, H)
+    "diffusion_num_inference_steps": 20,         # Changed from 25
     "diffusion_guidance_scale": 7.5,
     "diffusion_controlnet_scale": 1.0,
-    "diffusion_enable_cpu_offload": True, # If using GPU, offload when possible
+    "diffusion_enable_cpu_offload": False, # If using GPU, offload when possible
     "diffusion_scheduler": "DDIM",      # Scheduler type (e.g., DDIM, UniPC)
 
     # --- Output ---
     "default_output_dir": os.path.join(PROJECT_ROOT, "results", "pipeline_outputs"),
-    "save_intermediate_masks": False,   # Save raw/refined masks for debugging?
+    "save_intermediate_masks": True,    # Changed: Save raw/refined masks for debugging?
     "intermediate_mask_dir": os.path.join(PROJECT_ROOT, "results", "intermediate_masks"),
     "output_format": "png",             # Default save format (png, jpg, webp)
     "output_jpeg_quality": 90,          # Quality for JPEG/WebP saving

@@ -33,7 +33,7 @@ GRADIENT_SPEC = {'type': 'gradient'} # Uses default gradient from config
 
 DIFFUSION_SPEC = {'type': 'diffusion'}
 # A generic prompt for diffusion backgrounds
-DIFFUSION_PROMPT = "Clean, neutral, professional studio background, soft lighting, high quality product shot"
+DIFFUSION_PROMPT = "Clean, neutral, professional studio background, soft lighting, dark background, high quality product shot"
 
 # Ensure output directory exists
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

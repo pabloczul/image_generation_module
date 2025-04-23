@@ -256,10 +256,13 @@ class DiffusionGenerator:
         num_inference_steps: int = 30,
         guidance_scale: float = 7.5,
         controlnet_conditioning_scale: float = 0.75, # ControlNet strength
-        generator: Optional[torch.Generator] = None # For reproducibility
+        generator: Optional[torch.Generator] = None, # For reproducibility
+        target_processing_size: Optional[Tuple[int, int]] = None # Added: Target size (W, H)
     ) -> Optional[Image.Image]:
         """
         Generates a new background using the initialized ControlNet Inpainting pipeline.
+        Resizes inputs to target_processing_size if provided, otherwise to multiple of 8.
+        Resizes output back to original input size.
 
         Args:
             image_input: The input image (path, array, or PIL).
@@ -271,48 +274,67 @@ class DiffusionGenerator:
             guidance_scale (float): Scale for guidance loss (higher means follows prompt more).
             controlnet_conditioning_scale (float): Weight of the ControlNet conditioning.
             generator (Optional[torch.Generator]): PyTorch generator for deterministic results.
+            target_processing_size (Optional[Tuple[int, int]]): Target (W, H) for diffusion.
+                                                             If None, uses original size rounded down.
 
         Returns:
-            Optional[Image.Image]: The generated image with the new background, or None if fails.
+            Optional[Image.Image]: The generated image (resized to original input size), or None if fails.
         """
         image_pil, mask_pil = self._prepare_image_mask_pair(image_input, foreground_mask)
         if image_pil is None or mask_pil is None:
             # Error already logged by _prepare_image_mask_pair
             return None
 
-        # Prepare ControlNet conditioning image based on the initialized type
+        # Store original size for final resize
+        original_width, original_height = image_pil.size
+
+        # Prepare ControlNet conditioning image (using original size PIL)
         control_image = self._prepare_control_image(image_pil, mask_pil, self.controlnet_type)
         if control_image is None:
             logging.error(f"Failed to prepare control image for type '{self.controlnet_type}'. Aborting generation.") # Use logging
             return None
 
-        # Prepare mask for inpainting: 0=Keep, 255=Inpaint
-        # Invert the foreground mask
+        # Prepare mask for inpainting: 0=Keep, 255=Inpaint (using original size PIL)
         inpaint_mask_pil = Image.eval(mask_pil.convert('L'), lambda p: 255 if p < 128 else 0)
         
-        # Resize all inputs to be multiples of 8 (required by SD)
-        width, height = image_pil.size
-        new_width = (width // 8) * 8
-        new_height = (height // 8) * 8
-    
-        if new_width == 0 or new_height == 0:
-            logging.error(f"Error: Image dimensions ({width}x{height}) are too small, resulting in 0 after rounding to multiple of 8.") # Use logging
-            return None
-            
-        logging.info(f"Resizing inputs from ({width}x{height}) to ({new_width}x{new_height}) for diffusion.") # Use logging
-        image_pil = image_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        inpaint_mask_pil = inpaint_mask_pil.resize((new_width, new_height), Image.Resampling.NEAREST)
-        control_image = control_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        # Determine processing size and resize inputs
+        if target_processing_size is not None:
+            if not (isinstance(target_processing_size, tuple) and len(target_processing_size) == 2 and 
+                    isinstance(target_processing_size[0], int) and isinstance(target_processing_size[1], int)):
+                logging.warning(f"Invalid target_processing_size {target_processing_size}, must be tuple(int, int). Falling back to default resizing.")
+                target_processing_size = None # Fallback
+
+        if target_processing_size:
+            # Use target size, ensuring multiple of 8
+            proc_width = (target_processing_size[0] // 8) * 8
+            proc_height = (target_processing_size[1] // 8) * 8
+            if proc_width == 0 or proc_height == 0:
+                logging.error(f"Target processing size {target_processing_size} is too small after rounding to multiple of 8. Cannot process.")
+                return None
+            logging.info(f"Resizing inputs from ({original_width}x{original_height}) to target processing size ({proc_width}x{proc_height}) for diffusion.")
+        else:
+            # Default: Use original size rounded down to multiple of 8
+            proc_width = (original_width // 8) * 8
+            proc_height = (original_height // 8) * 8
+            if proc_width == 0 or proc_height == 0:
+                logging.error(f"Original image size ({original_width}x{original_height}) is too small after rounding to multiple of 8. Cannot process.")
+                return None
+            logging.info(f"Resizing inputs from ({original_width}x{original_height}) to ({proc_width}x{proc_height}) based on original size for diffusion.")
+
+        # Resize all inputs for the pipeline
+        image_pil_proc = image_pil.resize((proc_width, proc_height), Image.Resampling.LANCZOS)
+        inpaint_mask_pil_proc = inpaint_mask_pil.resize((proc_width, proc_height), Image.Resampling.NEAREST)
+        control_image_proc = control_image.resize((proc_width, proc_height), Image.Resampling.LANCZOS)
 
         try:
             logging.info(f"Generating background with prompt: '{prompt}'") # Use logging
-            # Run the pipeline
-            result_image = self.pipe(
+            # Run the pipeline with processed inputs
+            result_image_proc = self.pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                image=image_pil,
-                mask_image=inpaint_mask_pil,
-                control_image=control_image,
+                image=image_pil_proc,
+                mask_image=inpaint_mask_pil_proc,
+                control_image=control_image_proc,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 controlnet_conditioning_scale=controlnet_conditioning_scale,
@@ -320,8 +342,9 @@ class DiffusionGenerator:
                 # strength=1.0, # For inpainting, strength is often 1.0
                 ).images[0]
     
-            # Resize back to original size? Optional, depends on desired output.
-            # result_image = result_image.resize((width, height), Image.Resampling.LANCZOS)
+            # Resize result back to original input size
+            logging.info(f"Resizing generated background from ({proc_width}x{proc_height}) back to original size ({original_width}x{original_height}).")
+            result_image = result_image_proc.resize((original_width, original_height), Image.Resampling.LANCZOS)
 
             logging.info("Background generation finished.") # Use logging
             return result_image

@@ -339,6 +339,7 @@ class GenerationPipeline:
                           logging.error("Diffusion requested but no prompt provided.") # Use logging
                           raise ValueError("Diffusion requested but no prompt provided.")
                      logging.info(f"   Generating diffusion background with prompt: '{effective_prompt}'") # Use logging
+                     
                      # Get diffusion parameters from config
                      diff_params = {
                          'num_inference_steps': self.config.get('diffusion_num_inference_steps', 30),
@@ -346,11 +347,21 @@ class GenerationPipeline:
                          'controlnet_conditioning_scale': self.config.get('diffusion_controlnet_scale', 0.75)
                      }
                      logging.info(f"   Diffusion params: {diff_params}") # Use logging
+
+                     # Get target processing resolution from config
+                     target_res = self.config.get('diffusion_processing_resolution')
+                     if target_res and not (isinstance(target_res, (tuple, list)) and len(target_res) == 2):
+                         logging.warning(f"Invalid diffusion_processing_resolution in config: {target_res}. Must be tuple/list of 2 ints. Using default resizing.")
+                         target_res = None
+                     else:
+                         logging.info(f"   Using target diffusion processing resolution: {target_res}")
+
                      # DiffusionGenerator might need PIL image and PIL mask
                      bg_pil = self.diffusion_generator.generate(
                          image_input=input_pil, # Original RGB PIL
                          foreground_mask=final_mask_pil, # Final (feathered) L mask PIL
                          prompt=effective_prompt,
+                         target_processing_size=target_res, # Pass target size
                          **diff_params
                      )
                      if bg_pil is None: 
