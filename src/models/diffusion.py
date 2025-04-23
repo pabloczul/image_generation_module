@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Union, Optional, Dict, Any, Tuple
 import warnings
 import cv2 # Imported for Canny edge detection
+import logging # Added
 
 try:
     from diffusers import (
@@ -114,9 +115,10 @@ class DiffusionGenerator:
         else:
             self.torch_dtype = torch_dtype
 
-        print(f"Initializing DiffusionGenerator on device: {self.device} with dtype: {self.torch_dtype}")
-        print(f"Loading Stable Diffusion model: {sd_model_id}")
-        print(f"Loading ControlNet ({controlnet_type}): {self.controlnet_id}")
+        # Use logging instead of print
+        logging.info(f"Initializing DiffusionGenerator on device: {self.device} with dtype: {self.torch_dtype}")
+        logging.info(f"Loading Stable Diffusion model: {sd_model_id}")
+        logging.info(f"Loading ControlNet ({controlnet_type}): {self.controlnet_id}")
 
         try:
             self.controlnet = ControlNetModel.from_pretrained(
@@ -128,7 +130,7 @@ class DiffusionGenerator:
                 sd_model_id,
                 controlnet=self.controlnet,
                 torch_dtype=self.torch_dtype,
-                # safety_checker=None # Optional: disable safety checker if needed
+                safety_checker=None # Disable safety checker
             )
 
             # Setup scheduler
@@ -142,17 +144,17 @@ class DiffusionGenerator:
             self.pipe = self.pipe.to(self.device)
 
             if self.device == "cuda" and enable_cpu_offload:
-                 print("Enabling CPU offload for model components.")
+                 logging.info("Enabling CPU offload for model components.") # Use logging
                  self.pipe.enable_model_cpu_offload()
             elif self.device == "cuda":
                  # Potential memory optimization if offload is not used
                  # self.pipe.enable_vae_slicing() # Consider if needed
                  pass
 
-            print("Diffusion pipeline initialized successfully.")
+            logging.info("Diffusion pipeline initialized successfully.") # Use logging
 
         except Exception as e:
-            print(f"Error loading diffusion models or setting up pipeline: {e}")
+            logging.error(f"Error loading diffusion models or setting up pipeline: {e}", exc_info=True) # Use logging, add traceback
             raise RuntimeError(f"Failed to initialize DiffusionGenerator. Error: {e}") from e
             
     @staticmethod
@@ -189,7 +191,7 @@ class DiffusionGenerator:
                 
             return image_pil, mask_pil
         except Exception as e:
-            print(f"Error preparing image/mask: {e}")
+            logging.error(f"Error preparing image/mask: {e}", exc_info=True) # Use logging
             return None, None
             
     @staticmethod
@@ -242,7 +244,7 @@ class DiffusionGenerator:
                 warnings.warn(f"Condition type '{condition_type}' currently unsupported for control image generation.")
                 return None
         except Exception as e:
-            print(f"Error preparing control image ({condition_type}): {e}")
+            logging.error(f"Error preparing control image ({condition_type}): {e}", exc_info=True) # Use logging
             return None
 
     def generate(
@@ -275,12 +277,13 @@ class DiffusionGenerator:
         """
         image_pil, mask_pil = self._prepare_image_mask_pair(image_input, foreground_mask)
         if image_pil is None or mask_pil is None:
+            # Error already logged by _prepare_image_mask_pair
             return None
 
         # Prepare ControlNet conditioning image based on the initialized type
         control_image = self._prepare_control_image(image_pil, mask_pil, self.controlnet_type)
         if control_image is None:
-            print(f"Failed to prepare control image for type '{self.controlnet_type}'. Aborting generation.")
+            logging.error(f"Failed to prepare control image for type '{self.controlnet_type}'. Aborting generation.") # Use logging
             return None
 
         # Prepare mask for inpainting: 0=Keep, 255=Inpaint
@@ -293,16 +296,16 @@ class DiffusionGenerator:
         new_height = (height // 8) * 8
     
         if new_width == 0 or new_height == 0:
-            print(f"Error: Image dimensions ({width}x{height}) are too small, resulting in 0 after rounding to multiple of 8.")
+            logging.error(f"Error: Image dimensions ({width}x{height}) are too small, resulting in 0 after rounding to multiple of 8.") # Use logging
             return None
             
-        print(f"Resizing inputs from ({width}x{height}) to ({new_width}x{new_height}) for diffusion.")
+        logging.info(f"Resizing inputs from ({width}x{height}) to ({new_width}x{new_height}) for diffusion.") # Use logging
         image_pil = image_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
         inpaint_mask_pil = inpaint_mask_pil.resize((new_width, new_height), Image.Resampling.NEAREST)
         control_image = control_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         try:
-            print(f"Generating background with prompt: '{prompt}'")
+            logging.info(f"Generating background with prompt: '{prompt}'") # Use logging
             # Run the pipeline
             result_image = self.pipe(
                 prompt=prompt,
@@ -320,14 +323,14 @@ class DiffusionGenerator:
             # Resize back to original size? Optional, depends on desired output.
             # result_image = result_image.resize((width, height), Image.Resampling.LANCZOS)
 
-            print("Background generation finished.")
+            logging.info("Background generation finished.") # Use logging
             return result_image
 
         except Exception as e:
-            print(f"Error during diffusion pipeline execution: {e}")
+            logging.error(f"Error during diffusion pipeline execution: {e}", exc_info=True) # Use logging
             # Potentially catch specific errors like OOM
             if "CUDA out of memory" in str(e):
-                print("CUDA Out of Memory error. Try reducing image size, using CPU offload, or a smaller model.")
+                logging.error("CUDA Out of Memory error. Try reducing image size, using CPU offload, or a smaller model.") # Use logging
             return None
 
 # == Example Usage ==

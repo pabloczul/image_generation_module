@@ -49,7 +49,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # --- Background Generation ---
     "diffusion_enabled": False,         # Enable diffusion background generation?
     # Default Diffusion Settings (can be overridden by diffusion_cfg)
-    "diffusion_model_id": "runwayml/stable-diffusion-inpainting",
+    "diffusion_model_id": "runwayml/stable-diffusion-v1-5",
     "diffusion_controlnet_model_id": "lllyasviel/control_v11p_sd15_inpaint", # Or other ControlNets
     "diffusion_device": "cpu",          # "cuda" if GPU available/configured
     "diffusion_num_inference_steps": 25,

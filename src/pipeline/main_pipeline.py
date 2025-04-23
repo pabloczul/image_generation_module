@@ -12,6 +12,8 @@ import numpy as np
 import time
 import cv2
 import os
+import logging # Added
+import sys # Added for logging setup
 
 # Import refactored components using absolute paths from src
 from src.image.segmentation import Segmenter # Use Segmenter class
@@ -108,6 +110,17 @@ class GenerationPipeline:
         Initializes the pipeline with necessary components, loading configuration.
         Includes overrides for key parameters.
         """
+        # --- Basic Logging Setup --- 
+        # Ideally, setup logging in the main entry point (main.py or generate.py)
+        # For now, setting up basic config here if not already configured.
+        if not logging.getLogger().hasHandlers():
+            logging.basicConfig(
+                level=logging.INFO, 
+                format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                stream=sys.stdout # Log to stdout
+            )
+        # ---------------------------    
+            
         # Load base configuration (defaults or from file)
         self.config = load_config(config_path) # load_config returns a copy
 
@@ -119,11 +132,11 @@ class GenerationPipeline:
         if save_intermediate_masks_override is not None:
             self.config['save_intermediate_masks'] = save_intermediate_masks_override
 
-        print("Initializing pipeline components...")
+        logging.info("Initializing pipeline components...") # Use logging
 
         # Initialize Segmenter using the potentially overridden value
         self.segmenter = Segmenter(model_name=self.config.get('segmenter_model', 'u2net'))
-        print(f"Segmenter initialized with model: {self.segmenter.model_name}")
+        logging.info(f"Segmenter initialized with model: {self.segmenter.model_name}") # Use logging
 
         # Initialize ImageAssessor (assuming simplified usage or removal)
         # qa_cfg = self.config.get('quality_assessment', {})
@@ -133,7 +146,7 @@ class GenerationPipeline:
              contrast_threshold=self.config.get('contrast_threshold', 30.0),
              # bg_complexity_threshold=qa_cfg.get('bg_complexity_threshold', 0.1)
         )
-        print("ImageAssessor initialized.")
+        logging.info("ImageAssessor initialized.") # Use logging
 
         # Initialize diffusion only if enabled in the config
         self.diffusion_generator: Optional[DiffusionGenerator] = None
@@ -141,39 +154,42 @@ class GenerationPipeline:
         is_diffusion_enabled = self.config.get('diffusion_enabled', False)
 
         if is_diffusion_enabled:
-             print("Diffusion is enabled. Initializing Diffusion Generator...")
+             logging.info("Diffusion is enabled. Initializing Diffusion Generator...") # Use logging
              # Build the config for DiffusionGenerator directly from top-level keys
              final_diff_cfg = {
                 # Use .get() with fallbacks to defaults from DEFAULT_CONFIG dict itself
                 # Map config keys to DiffusionGenerator __init__ args
-                'sd_model_id': self.config.get('diffusion_model_id', DEFAULT_CONFIG['diffusion_model_id']),
-                'controlnet_model_id': self.config.get('diffusion_controlnet_model_id', DEFAULT_CONFIG['diffusion_controlnet_model_id']),
-                'device': self.config.get('diffusion_device', DEFAULT_CONFIG['diffusion_device']),
-                'scheduler_type': self.config.get('diffusion_scheduler', DEFAULT_CONFIG['diffusion_scheduler']),
-                'enable_cpu_offload': self.config.get('diffusion_enable_cpu_offload', DEFAULT_CONFIG['diffusion_enable_cpu_offload'])
+                'sd_model_id': self.config.get('diffusion_model_id', DEFAULT_CONFIG.get('diffusion_model_id')),
+                # Use 'custom_controlnet_id' which DiffusionGenerator expects
+                'custom_controlnet_id': self.config.get('diffusion_controlnet_model_id', DEFAULT_CONFIG.get('diffusion_controlnet_model_id')),
+                # Add controlnet_type, defaulting to 'seg'
+                'controlnet_type': self.config.get('diffusion_controlnet_type', DEFAULT_CONFIG.get('diffusion_controlnet_type', 'seg')),
+                'device': self.config.get('diffusion_device', DEFAULT_CONFIG.get('diffusion_device')),
+                'scheduler_type': self.config.get('diffusion_scheduler', DEFAULT_CONFIG.get('diffusion_scheduler')),
+                'enable_cpu_offload': self.config.get('diffusion_enable_cpu_offload', DEFAULT_CONFIG.get('diffusion_enable_cpu_offload'))
                 # Add other DiffusionGenerator params here if needed, fetching from self.config
              }
 
              # Apply specific JSON overrides if provided
              if diffusion_cfg_overrides:
-                  print(f"Applying diffusion overrides: {diffusion_cfg_overrides}")
+                  logging.info(f"Applying diffusion overrides: {diffusion_cfg_overrides}") # Use logging
                   final_diff_cfg.update(diffusion_cfg_overrides)
 
              # Filter out None values as DiffusionGenerator might expect specific types
              final_diff_cfg_filtered = {k: v for k, v in final_diff_cfg.items() if v is not None}
 
              try:
-                 print(f"Initializing Diffusion Generator with effective config: {final_diff_cfg_filtered}")
+                 logging.info(f"Initializing Diffusion Generator with effective config: {final_diff_cfg_filtered}") # Use logging
                  self.diffusion_generator = DiffusionGenerator(**final_diff_cfg_filtered)
-                 print("Diffusion Generator initialized successfully.")
+                 logging.info("Diffusion Generator initialized successfully.") # Use logging
              except Exception as e:
-                 print(f"Warning: Failed to initialize DiffusionGenerator: {e}. Diffusion background generation will not be available.")
-                 # Keep self.diffusion_generator as None
+                 # Error is logged within DiffusionGenerator now, just log warning here
+                 logging.warning(f"Pipeline: Failed to initialize DiffusionGenerator. Diffusion will be unavailable. Error: {e}") # Use logging
                  self.diffusion_generator = None
         else:
-             print("Diffusion is disabled.")
+             logging.info("Diffusion is disabled.") # Use logging
 
-        print("Pipeline initialized.")
+        logging.info("Pipeline initialized.") # Use logging
 
     def process_image(
         self,
@@ -200,7 +216,7 @@ class GenerationPipeline:
         output_path = Path(output_path)
         # Use output filename (without extension) as base for intermediate files
         output_basename = output_path.stem
-        print(f"--- Starting processing for: {image_path.name} -> {output_path.name} ---")
+        logging.info(f"--- Starting processing for: {image_path.name} -> {output_path.name} ---") # Use logging
 
         # Ensure output directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +229,7 @@ class GenerationPipeline:
         add_shadow_flag = self.config.get('add_shadow', True)
 
         # 1. Load Image
-        print("1. Loading image...")
+        logging.info("1. Loading image...") # Use logging
         input_pil = load_image(image_path, mode='RGB')
         if input_pil is None: return False # Error logged in load_image
         W, H = input_pil.size
@@ -221,16 +237,16 @@ class GenerationPipeline:
         input_rgb_np = np.array(input_pil)
 
         # 2. Assess Quality (Simplified/Placeholder)
-        print("2. Assessing image quality...")
+        logging.info("2. Assessing image quality...") # Use logging
         # Assuming basic checks or skipping detailed assessment for now
         # quality_assessment = self.assessor.assess_quality(input_pil) # Original call
         # print(f"Quality Assessment: {quality_assessment['message']}")
         # if not quality_assessment['is_processable']:
         #      print("Warning: Proceeding despite low quality assessment.")
-        print("   Skipping detailed quality assessment.")
+        logging.info("   Skipping detailed quality assessment.") # Use logging
 
         # 3. Segment Foreground
-        print("3. Segmenting foreground...")
+        logging.info("3. Segmenting foreground...") # Use logging
         try:
             # Pass flags and config directly to segmenter
             segmentation_params = {
@@ -243,14 +259,14 @@ class GenerationPipeline:
             # Segment now takes numpy array and returns final numpy mask (raw or refined)
             final_mask_np = self.segmenter.segment(input_rgb_np, return_rgba=False, **segmentation_params)
             if final_mask_np is None: raise RuntimeError("Segmentation returned None.")
-            print("   Segmentation complete.")
+            logging.info("   Segmentation complete.") # Use logging
         except Exception as e:
-            print(f"Error during segmentation: {e}")
+            logging.error(f"Error during segmentation: {e}", exc_info=True) # Use logging
             return False
 
         # 4. Feather Mask Edges (Optional)
         if feather_amount > 0:
-            print(f"4. Feathering mask edges (sigma={feather_amount})...")
+            logging.info(f"4. Feathering mask edges (sigma={feather_amount})...") # Use logging
             # Feathering needs float mask
             mask_float = final_mask_np.astype(np.float32) / 255.0
             # Kernel size must be odd
@@ -260,13 +276,13 @@ class GenerationPipeline:
                 feathered_mask_float = cv2.GaussianBlur(mask_float, (k_size, k_size), feather_amount)
                 # Convert back to uint8 for compositing
                 final_mask_np = (feathered_mask_float * 255).clip(0, 255).astype(np.uint8)
-                print("   Mask feathering complete.")
+                logging.info("   Mask feathering complete.") # Use logging
             except Exception as e:
-                 print(f"Warning: Failed to feather mask: {e}. Using unfeathered mask.")
+                 logging.warning(f"Failed to feather mask: {e}. Using unfeathered mask.", exc_info=True) # Use logging
                  # Fallback to the unfeathered mask if blur fails
                  final_mask_np = final_mask_np
         else:
-             print("4. Skipping mask edge feathering.")
+             logging.info("4. Skipping mask edge feathering.") # Use logging
 
         # Convert final mask to PIL (needed for diffusion? Check DiffusionGenerator usage)
         final_mask_pil = Image.fromarray(final_mask_np).convert('L')
@@ -276,7 +292,7 @@ class GenerationPipeline:
         foreground_rgba_np[:, :, 3] = final_mask_np
 
         # 5. Prepare Background
-        print(f"5. Preparing background... Spec: {background_spec}")
+        logging.info(f"5. Preparing background... Spec: {background_spec}") # Use logging
         background_rgb_np: Optional[np.ndarray] = None
         target_size = (W, H)
         bg_type = 'unknown'
@@ -285,18 +301,18 @@ class GenerationPipeline:
             # Logic for handling background_spec (file, tuple, dict)
             if isinstance(background_spec, (str, Path)):
                 bg_type = 'file'
-                print(f"   Type: File ({background_spec})")
+                logging.info(f"   Type: File ({background_spec})") # Use logging
                 background_rgb_np = load_background_image(background_spec, target_size)
                 if background_rgb_np is None: raise ValueError(f"Failed loading bg: {background_spec}")
             elif isinstance(background_spec, tuple) and len(background_spec) == 3:
                  bg_type = 'solid'
-                 print(f"   Type: Solid Color ({background_spec})")
+                 logging.info(f"   Type: Solid Color ({background_spec})") # Use logging
                  bg_pil = generate_solid_background(width=W, height=H, color=background_spec)
                  if bg_pil: background_rgb_np = np.array(bg_pil)
                  else: raise ValueError(f"Failed generating solid bg: {background_spec}")
             elif isinstance(background_spec, dict):
                  bg_type = background_spec.get('type', 'unknown')
-                 print(f"   Type: Dict ({bg_type})")
+                 logging.info(f"   Type: Dict ({bg_type})") # Use logging
                  if bg_type == 'file':
                      bg_path = background_spec.get('path')
                      if not bg_path: raise ValueError("Bg type 'file' needs 'path'.")
@@ -315,17 +331,21 @@ class GenerationPipeline:
                      else: raise ValueError("Failed generating gradient bg.")
                  elif bg_type == 'diffusion':
                      if not self.diffusion_generator:
-                          raise RuntimeError("Diffusion requested but generator not initialized.")
+                          # Log error instead of raising immediately?
+                          logging.error("Diffusion requested but generator not initialized.") # Use logging
+                          raise RuntimeError("Diffusion requested but generator not initialized.") # Keep raise for now
                      effective_prompt = background_spec.get('prompt', prompt)
-                     if not effective_prompt: raise ValueError("Diffusion requested but no prompt provided.")
-                     print(f"   Generating diffusion background with prompt: '{effective_prompt}'")
+                     if not effective_prompt: 
+                          logging.error("Diffusion requested but no prompt provided.") # Use logging
+                          raise ValueError("Diffusion requested but no prompt provided.")
+                     logging.info(f"   Generating diffusion background with prompt: '{effective_prompt}'") # Use logging
                      # Get diffusion parameters from config
                      diff_params = {
                          'num_inference_steps': self.config.get('diffusion_num_inference_steps', 30),
                          'guidance_scale': self.config.get('diffusion_guidance_scale', 7.5),
                          'controlnet_conditioning_scale': self.config.get('diffusion_controlnet_scale', 0.75)
                      }
-                     print(f"   Diffusion params: {diff_params}")
+                     logging.info(f"   Diffusion params: {diff_params}") # Use logging
                      # DiffusionGenerator might need PIL image and PIL mask
                      bg_pil = self.diffusion_generator.generate(
                          image_input=input_pil, # Original RGB PIL
@@ -333,7 +353,10 @@ class GenerationPipeline:
                          prompt=effective_prompt,
                          **diff_params
                      )
-                     if bg_pil is None: raise RuntimeError("Diffusion generation failed.")
+                     if bg_pil is None: 
+                         # Error already logged in diffusion.py
+                         logging.error("Pipeline: Diffusion generation failed.") # Use logging
+                         raise RuntimeError("Diffusion generation failed.") # Keep raise
                      background_rgb_np = np.array(bg_pil.convert('RGB'))
                  else:
                      raise ValueError(f"Unknown background type in dict: {bg_type}")
@@ -343,16 +366,15 @@ class GenerationPipeline:
             if background_rgb_np is None:
                  raise ValueError("Background preparation resulted in None.")
 
-            print("   Background prepared.")
+            logging.info("   Background prepared.") # Use logging
         except Exception as e:
-            print(f"Error preparing background: {e}")
+            logging.error(f"Error preparing background: {e}", exc_info=True) # Use logging
             return False
 
         # 6. Add Shadow (Optional)
-        # Start with the foreground RGBA numpy array (potentially feathered mask)
         foreground_with_shadow_np = foreground_rgba_np
         if add_shadow_flag:
-            print("6. Adding drop shadow...")
+            logging.info("6. Adding drop shadow...") # Use logging
             shadow_params = {
                 'offset': (
                     self.config.get('shadow_offset_x', 5),
@@ -362,21 +384,18 @@ class GenerationPipeline:
                 'opacity': self.config.get('shadow_opacity', 0.5),
                 'shadow_color': self.config.get('shadow_color', (0, 0, 0))
             }
-            print(f"   Shadow params: {shadow_params}")
+            logging.info(f"   Shadow params: {shadow_params}") # Use logging
             try:
-                # Use the helper function, it returns a *new* RGBA array
-                # with the shadow composited behind the original foreground
                 foreground_with_shadow_np = add_soft_drop_shadow(foreground_rgba_np, **shadow_params)
-                print("   Shadow added.")
+                logging.info("   Shadow added.") # Use logging
             except Exception as e:
-                print(f"Warning: Failed to add shadow: {e}. Proceeding without shadow.")
-                # Keep the original foreground_rgba_np if shadow fails
+                logging.warning(f"Failed to add shadow: {e}. Proceeding without shadow.", exc_info=True) # Use logging
                 foreground_with_shadow_np = foreground_rgba_np
         else:
-            print("6. Skipping drop shadow.")
+            logging.info("6. Skipping drop shadow.") # Use logging
 
         # 7. Combine Final Foreground (with shadow) and Background
-        print("7. Combining final layers...")
+        logging.info("7. Combining final layers...") # Use logging
         try:
             # Ensure background is also RGBA for consistent compositing
             if background_rgb_np.shape[2] == 3:
@@ -394,24 +413,26 @@ class GenerationPipeline:
             # is already blended into the transparent areas behind the object.
             final_image_pil = background_pil.copy()
             final_image_pil.paste(foreground_pil, (0, 0), foreground_pil) # Paste using fg alpha
-            print("   Layers combined.")
+            logging.info("   Layers combined.") # Use logging
         except Exception as e:
-            print(f"Error combining layers: {e}")
+            logging.error(f"Error combining layers: {e}", exc_info=True) # Use logging
             return False
 
         # 8. Save Result
-        print(f"8. Saving final image to: {output_path}")
+        logging.info(f"8. Saving final image to: {output_path}") # Use logging
         # Convert to RGB before saving unless transparency is desired (e.g., PNG)
         save_mode = 'RGBA' if output_path.suffix.lower() == '.png' else 'RGB'
         success = save_image(final_image_pil.convert(save_mode), output_path)
 
         end_time = time.time()
-        print(f"--- Processing finished in {end_time - start_time:.2f} seconds. Success: {success} ---")
+        logging.info(f"--- Processing finished in {end_time - start_time:.2f} seconds. Success: {success} ---") # Use logging
         return success
 
 # --- Example Usage (for testing within the module) ---
 # if __name__ == '__main__':
-#     print("Testing pipeline...")
+#     # Setup basic logging for the example
+#     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+#     logging.info("Testing pipeline...")
 #     # Setup paths relative to project root or use absolute paths
 #     # Assumes running from project root where `data` and `results` exist
 #     test_image = Path("../data/images/your_test_image.jpg") # CHANGE THIS
@@ -419,7 +440,7 @@ class GenerationPipeline:
 #     output_dir.mkdir(parents=True, exist_ok=True)
 # 
 #     if not test_image.exists():
-#         print(f"Test image not found: {test_image}")
+#         logging.error(f"Test image not found: {test_image}")
 #     else:
 #         # --- Initialize Pipeline ---
 #         # Example with diffusion enabled (requires compatible hardware & models downloaded)
@@ -446,10 +467,10 @@ class GenerationPipeline:
 #         ]
 # 
 #         for i, case in enumerate(test_cases):
-#             print(f"\n--- Running Test Case {i+1} ---")
+#             logging.info(f"\n--- Running Test Case {i+1} ---")
 #             # Skip diffusion if not available
 #             if isinstance(case['bg'], dict) and case['bg']['type'] == 'diffusion' and not pipeline.diffusion_generator:
-#                 print("Skipping diffusion test case as DiffusionGenerator is not available.")
+#                 logging.warning("Skipping diffusion test case as DiffusionGenerator is not available.")
 #                 continue
 #                 
 #             pipeline.process_image(
