@@ -9,6 +9,7 @@ import rembg
 from pathlib import Path
 from typing import Union, Optional, List, Dict, Any, Tuple
 import os # Added for path joining
+import logging # Added
 
 # Use absolute import from src
 from src.utils.data_io import save_image
@@ -29,7 +30,7 @@ class Segmenter:
     """
     Provides methods for segmenting product images to isolate foreground objects.
 
-    Uses the 'rembg' library for initial segmentation and OpenCV for mask refinement.
+    Uses the 'rembg' library for initial segmentation. Refinement is handled externally.
     """
     def __init__(self, model_name: str = DEFAULT_MODEL):
         """
@@ -50,45 +51,34 @@ class Segmenter:
         try:
             # Pre-initialize the session for potential reuse
             self.session = rembg.new_session(model_name=self.model_name)
-            print(f"Segmenter initialized with model: {self.model_name}")
+            logging.info(f"Segmenter initialized with rembg model: {self.model_name}")
         except Exception as e:
-            print(f"Error initializing rembg session for model {self.model_name}: {e}")
+            logging.exception(f"Error initializing rembg session for model {self.model_name}: {e}")
             # Optionally re-raise or handle depending on desired robustness
             raise ImportError("Failed to initialize rembg. Ensure it's installed and models are available.") from e
 
     def segment(
         self,
         image_input: Union[str, Path, np.ndarray, Image.Image],
-        return_rgba: bool = False,
-        refine: bool = True, # Add option to skip refinement
-        refinement_config: Optional[Dict[str, Any]] = None, # Pass config directly
         save_intermediate: bool = False, # Option to save masks
         intermediate_dir: Optional[Union[str, Path]] = None, # Directory for saving
         output_basename: str = "segmented_item" # Basename for saved masks
-    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    ) -> Optional[np.ndarray]: # Changed return type
         """
-        Segments the foreground object from an image.
+        Segments the foreground object from an image using the configured rembg model.
+        Returns only the raw alpha mask.
 
         Args:
             image_input (Union[str, Path, np.ndarray, Image.Image]):
                 Path to the image file, a NumPy array (H, W, C), or a PIL Image object.
-            return_rgba (bool): If True, returns the RGBA image (foreground only)
-                                along with the alpha mask. Otherwise, returns only the alpha mask.
-            refine (bool): If True, applies mask refinement operations. Defaults to True.
-            refinement_config (Optional[Dict[str, Any]]): Dictionary with refinement parameters
-                overriding defaults from config.py (e.g., kernel sizes, iterations).
-            save_intermediate (bool): If True, saves the raw and refined masks.
-            intermediate_dir (Optional[Union[str, Path]]): Directory to save intermediate masks.
+            save_intermediate (bool): If True, saves the raw mask.
+            intermediate_dir (Optional[Union[str, Path]]): Directory to save intermediate mask.
                                                         Required if save_intermediate is True.
-            output_basename (str): Base filename for saving intermediate masks.
+            output_basename (str): Base filename for saving intermediate mask.
 
         Returns:
-            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
-                - If return_rgba is False: A NumPy array representing the final alpha mask
-                  (0-255, uint8), potentially refined.
-                - If return_rgba is True: A tuple containing:
-                    - The RGBA NumPy array (H, W, 4) of the segmented foreground.
-                    - The final alpha mask NumPy array (H, W), potentially refined.
+            Optional[np.ndarray]: NumPy array representing the raw alpha mask (0-255, uint8),
+                                  or None if segmentation fails.
 
         Raises:
             TypeError: If the input type is not supported.
@@ -97,181 +87,80 @@ class Segmenter:
             Exception: For errors during the segmentation process.
         """
         if save_intermediate and not intermediate_dir:
-            raise ValueError("intermediate_dir must be provided if save_intermediate is True.")
+            logging.error("intermediate_dir must be provided if save_intermediate is True for Segmenter.")
+            # Raise or return None depending on desired strictness
+            # raise ValueError("intermediate_dir must be provided if save_intermediate is True.")
+            return None 
 
         if intermediate_dir:
             intermediate_dir = Path(intermediate_dir)
             intermediate_dir.mkdir(parents=True, exist_ok=True) # Ensure dir exists
 
         try:
+            # --- Input Image Handling --- (Simplified slightly)
             if isinstance(image_input, (str, Path)):
                 image_path = Path(image_input)
                 if not image_path.is_file():
+                    logging.error(f"Image file not found: {image_path}")
                     raise FileNotFoundError(f"Image file not found: {image_path}")
-                input_image = Image.open(image_path).convert('RGB')
+                input_image = Image.open(image_path)
             elif isinstance(image_input, np.ndarray):
-                # Ensure input is in RGB order if it has 3 channels
-                if image_input.ndim == 3 and image_input.shape[2] == 3:
-                     # Assume BGR from OpenCV, convert to RGB for PIL
+                 # Convert BGR to RGB if it looks like OpenCV image
+                 if image_input.ndim == 3 and image_input.shape[2] == 3:
                      input_image = Image.fromarray(cv2.cvtColor(image_input.astype(np.uint8), cv2.COLOR_BGR2RGB))
-                else: # Grayscale or other formats handled by PIL directly
+                 else:
                      input_image = Image.fromarray(image_input.astype(np.uint8))
-                input_image = input_image.convert('RGB') # Ensure it's RGB for rembg
             elif isinstance(image_input, Image.Image):
-                input_image = image_input.convert('RGB')
+                 input_image = image_input # Already a PIL Image
             else:
-                raise TypeError(f"Unsupported input type: {type(image_input)}. "
-                                "Expected str, Path, np.ndarray, or PIL.Image.")
-
+                logging.error(f"Unsupported input type: {type(image_input)}")
+                raise TypeError(f"Unsupported input type: {type(image_input)}. Expected str, Path, np.ndarray, or PIL.Image.")
+            
+            # Ensure input is RGB for rembg consistency
+            input_image_rgb = input_image.convert('RGB') 
+            # --------------------------
+            
             # Use the pre-initialized session
-            output_image_pil = rembg.remove(input_image, session=self.session)
+            logging.debug(f"Running rembg.remove with model {self.model_name}...")
+            output_image_pil = rembg.remove(input_image_rgb, session=self.session)
+            logging.debug("rembg.remove finished.")
 
             # Extract raw alpha mask
             raw_alpha_mask = np.array(output_image_pil.getchannel(3)) # H, W, uint8
 
             # Save raw mask if requested
             if save_intermediate and intermediate_dir:
-                save_image(
-                    Image.fromarray(raw_alpha_mask),
-                    intermediate_dir / f"{output_basename}_mask_raw.png"
-                )
+                try:
+                    save_path = intermediate_dir / f"{output_basename}_mask_raw.png"
+                    save_image(Image.fromarray(raw_alpha_mask), save_path)
+                    logging.info(f"Saved raw mask to {save_path}")
+                except Exception as save_e:
+                    logging.error(f"Failed to save raw mask to {save_path}: {save_e}")
 
-            final_mask = raw_alpha_mask
-            if refine:
-                # Get refinement parameters, merging defaults with overrides
-                cfg = DEFAULT_CONFIG.copy()
-                if refinement_config:
-                    cfg.update(refinement_config)
-
-                final_mask = self.refine_mask_from_config(raw_alpha_mask, cfg)
-
-                # Save refined mask if requested
-                if save_intermediate and intermediate_dir:
-                    save_image(
-                        Image.fromarray(final_mask),
-                        intermediate_dir / f"{output_basename}_mask_refined.png"
-                    )
-
-            if return_rgba:
-                # Apply the *final* mask (refined or raw) back to the original image
-                # Create RGBA image from original RGB and final mask
-                rgb_image_np = np.array(input_image)
-                rgba_output = cv2.cvtColor(rgb_image_np, cv2.COLOR_RGB2RGBA)
-                rgba_output[:, :, 3] = final_mask # Set alpha channel
-                return rgba_output, final_mask
-            else:
-                return final_mask
+            # Return only the raw mask
+            return raw_alpha_mask
 
         except FileNotFoundError as e:
-            print(f"Error: {e}")
+            # Already logged
             raise
         except ValueError as e:
-            print(f"Configuration Error: {e}")
+            logging.error(f"Configuration or value error in segmentation: {e}", exc_info=True)
             raise
         except Exception as e:
-            print(f"Error during segmentation: {e}")
+            logging.exception(f"Error during segmentation process: {e}")
             # Consider more specific exception handling based on rembg errors
-            raise RuntimeError(f"Segmentation failed for input. Error: {e}") from e
+            # Return None or raise a custom exception?
+            # For now, re-raise a RuntimeError to indicate failure
+            raise RuntimeError(f"Segmentation failed. Error: {e}") from e
 
+    # Removed refine_mask_from_config method (moved to filtering.py)
+    
+    # Deprecated refine_mask method can be removed or kept with clear deprecation warning
     @staticmethod
-    def refine_mask_from_config(mask: np.ndarray, config: Dict[str, Any]) -> np.ndarray:
-        """
-        Refines a mask using morphological operations defined in the config dictionary.
+    def refine_mask(*args, **kwargs):
+        raise DeprecationWarning("Segmenter.refine_mask is deprecated. Use refine_morphological from src.image.filtering instead.")
 
-        Args:
-            mask (np.ndarray): Grayscale alpha mask (0-255) or binary mask.
-            config (Dict[str, Any]): Configuration dictionary containing keys like
-                                     'mask_opening_kernel_size', 'mask_opening_iterations',
-                                     'mask_dilation_kernel_size', 'mask_dilation_iterations'.
-
-        Returns:
-            np.ndarray: The refined mask (0-255, uint8).
-        """
-        if not isinstance(mask, np.ndarray):
-             raise TypeError(f"Input mask must be a NumPy array, got {type(mask)}")
-
-        refined_mask = mask.astype(np.uint8)
-        if refined_mask.ndim == 3 and refined_mask.shape[2] == 1:
-            refined_mask = refined_mask.squeeze()
-        elif refined_mask.ndim != 2:
-             raise ValueError(f"Input mask must be a single channel (grayscale or binary), shape was {mask.shape}")
-
-        # --- Morphological Opening (Remove noise) ---
-        open_k_size = config.get('mask_opening_kernel_size', 0)
-        open_iter = config.get('mask_opening_iterations', 1)
-        if open_k_size > 0 and open_k_size % 2 != 0: # Kernel size must be positive odd
-            kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (open_k_size, open_k_size))
-            refined_mask = cv2.morphologyEx(refined_mask, cv2.MORPH_OPEN, kernel_open, iterations=open_iter)
-        elif open_k_size > 0:
-             print(f"Warning: mask_opening_kernel_size ({open_k_size}) must be odd, skipping opening.")
-
-        # --- Morphological Dilation (Expand mask slightly) ---
-        dilate_k_size = config.get('mask_dilation_kernel_size', 0)
-        dilate_iter = config.get('mask_dilation_iterations', 1)
-        if dilate_k_size > 0 and dilate_k_size % 2 != 0: # Kernel size must be positive odd
-            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_k_size, dilate_k_size))
-            refined_mask = cv2.dilate(refined_mask, kernel_dilate, iterations=dilate_iter)
-        elif dilate_k_size > 0:
-             print(f"Warning: mask_dilation_kernel_size ({dilate_k_size}) must be odd, skipping dilation.")
-
-        return refined_mask
-
-    @staticmethod
-    def refine_mask(
-        mask: np.ndarray,
-        operations: Optional[List[Dict[str, Any]]] = None
-    ) -> np.ndarray:
-        """
-        DEPRECATED in favor of refine_mask_from_config for pipeline use.
-        Applies morphological operations to refine a binary or alpha mask based on a list of operations.
-        (Existing implementation remains)
-        """
-        if not isinstance(mask, np.ndarray):
-             raise TypeError(f"Input mask must be a NumPy array, got {type(mask)}")
-
-        if operations is None:
-            operations = [
-                {'type': 'close', 'kernel_size': 5, 'iterations': 1},
-                {'type': 'dilate', 'kernel_size': 3, 'iterations': 1}
-            ]
-
-        # Ensure mask is 8-bit single channel for OpenCV operations
-        if mask.ndim == 3:
-             if mask.shape[2] == 1:
-                 refined_mask = mask.squeeze().astype(np.uint8)
-             else:
-                 raise ValueError("Input mask must be a single channel (grayscale or binary).")
-        elif mask.ndim == 2:
-             refined_mask = mask.astype(np.uint8) # Convert boolean or other types
-        else:
-            raise ValueError(f"Input mask has unexpected dimensions: {mask.shape}")
-
-        valid_ops = {'dilate': cv2.dilate, 'erode': cv2.erode, 'open': cv2.MORPH_OPEN, 'close': cv2.MORPH_CLOSE}
-
-        for i, op in enumerate(operations):
-            op_type = op.get('type')
-            k_size = op.get('kernel_size')
-            iterations = op.get('iterations', 1) # Default to 1 iteration
-
-            if op_type not in valid_ops:
-                raise ValueError(f"Invalid operation type '{op_type}' in operation {i}. "
-                                 f"Valid types: {list(valid_ops.keys())}")
-            if not isinstance(k_size, int) or k_size <= 0 or k_size % 2 == 0:
-                raise ValueError(f"Invalid kernel_size '{k_size}' in operation {i}. "
-                                 "Must be a positive odd integer.")
-            if not isinstance(iterations, int) or iterations <= 0:
-                raise ValueError(f"Invalid iterations '{iterations}' in operation {i}. "
-                                 "Must be a positive integer.")
-
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
-
-            if op_type in ['open', 'close']:
-                refined_mask = cv2.morphologyEx(refined_mask, valid_ops[op_type], kernel, iterations=iterations)
-            else: # 'dilate', 'erode'
-                refined_mask = valid_ops[op_type](refined_mask, kernel, iterations=iterations)
-
-        return refined_mask
-
+    # Evaluate mask quality method can remain if useful independently
     @staticmethod
     def evaluate_mask_quality(mask: np.ndarray) -> Dict[str, Any]:
         """

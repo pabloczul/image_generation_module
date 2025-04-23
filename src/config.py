@@ -26,13 +26,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "contrast_threshold": 0.1,         # RMS contrast
 
     # --- Segmentation ---
-    "segmenter_model": "u2net",         # Default rembg model (e.g., u2net, u2netp, silueta, isnet-general-use)
+    "segmenter_model": "isnet-general-use",         # Default rembg model (e.g., u2net, u2netp, silueta, isnet-general-use)
     "segmentation_device": "cuda",       # Device for segmentation model ("cpu" or "cuda")
     "refine_mask": True,                # Apply morphological refinement?
     # Mask refinement parameters (applied if refine_mask is True)
-    "mask_opening_kernel_size": 5,      # Kernel size for morphological opening (removes noise, must be positive odd)
-    "mask_opening_iterations": 1,       # Iterations for opening
-    "mask_dilation_kernel_size": 5,     # Kernel size for morphological dilation (expands mask, must be positive odd)
+    "mask_opening_kernel_size": 3,      # Kernel size for morphological opening (removes noise, must be positive odd)
+    "mask_opening_iterations": 2,       # Iterations for opening
+    "mask_closing_kernel_size": 10,      # Kernel size for morphological closing (fills holes, must be positive odd, 0 to disable)
+    "mask_closing_iterations": 20,       # Iterations for closing
+    "mask_dilation_kernel_size": 1,     # Kernel size for morphological dilation (expands mask, must be positive odd)
     "mask_dilation_iterations": 1,      # Iterations for dilation
 
     # --- Compositing ---
@@ -58,6 +60,22 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "diffusion_controlnet_scale": 1.0,
     "diffusion_enable_cpu_offload": False, # If using GPU, offload when possible
     "diffusion_scheduler": "DDIM",      # Scheduler type (e.g., DDIM, UniPC)
+
+    # --- NEW Filtering Configuration ---
+    "apply_contrast_filter": False,       # Enable low contrast filter?
+    "contrast_filter_threshold": 10.0,    # Example threshold (adjust needed)
+    "contrast_band_width": 3,           # Pixel width for inner/outer contrast bands
+    "apply_text_filter": False,           # Enable text overlap filter?
+    "text_overlap_threshold": 0.1,      # Example threshold (10% overlap)
+    "apply_clutter_filter": False,        # Enable clutter filter?
+    "clutter_detector_model": "yolov8n.pt",# Example YOLO model 
+    "clutter_min_primary_iou": 0.5,     # Example threshold (50% IoU)
+    "clutter_max_other_overlap": 0.2,   # Example threshold (20% overlap)
+    "apply_contour_filter": False,        # Enable contour property filter?
+    "contour_max_points": 2000,         # Example threshold 
+    "contour_max_count": 5,             # Example threshold
+    "contour_min_solidity": 0.8,        # Example threshold
+    # -----------------------------------
 
     # --- Output ---
     "default_output_dir": os.path.join(PROJECT_ROOT, "results", "pipeline_outputs"),

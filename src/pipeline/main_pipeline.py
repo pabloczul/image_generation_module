@@ -24,6 +24,7 @@ from src.models.diffusion import DiffusionGenerator # If using diffusion
 from src.utils.data_io import save_image, load_image
 # Use absolute import from src root for config
 from src.config import load_config, DEFAULT_CONFIG # Import config loading function and defaults
+from src.image import filtering # Added import
 
 # --- Helper Function for Improved Shadow ---
 
@@ -199,100 +200,151 @@ class GenerationPipeline:
         prompt: Optional[str] = None
     ) -> bool:
         """
-        Processes a single image: load, assess, segment, refine mask, feather mask,
+        Processes a single image: load, assess, segment, filter/refine mask, feather mask,
         generate/load background, add shadow, combine.
-
-        Args:
-            image_path: Path to the input product image.
-            output_path: Path to save the resulting image.
-            background_spec: Defines the background (see config comments).
-            prompt (Optional[str]): Text prompt for diffusion.
-
-        Returns:
-            bool: True if successful, False otherwise.
         """
         start_time = time.time()
         image_path = Path(image_path)
         output_path = Path(output_path)
-        # Use output filename (without extension) as base for intermediate files
         output_basename = output_path.stem
-        logging.info(f"--- Starting processing for: {image_path.name} -> {output_path.name} ---") # Use logging
+        logging.info(f"--- Starting processing for: {image_path.name} -> {output_path.name} ---")
 
-        # Ensure output directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # --- Configurable Flags/Dirs/Params ---
         save_intermediate = self.config.get('save_intermediate_masks', False)
-        intermediate_dir = self.config.get('intermediate_mask_dir') if save_intermediate else None
+        intermediate_dir = Path(self.config.get('intermediate_mask_dir')) if save_intermediate else None
+        if intermediate_dir:
+             intermediate_dir.mkdir(parents=True, exist_ok=True)
+             
         refine_mask_flag = self.config.get('refine_mask', True)
         feather_amount = self.config.get('edge_feathering_amount', 0.0)
         add_shadow_flag = self.config.get('add_shadow', True)
 
-        # 1. Load Image
-        logging.info("1. Loading image...") # Use logging
+        # --- Load Image ---
+        logging.info("1. Loading image...")
         input_pil = load_image(image_path, mode='RGB')
-        if input_pil is None: return False # Error logged in load_image
+        if input_pil is None: return False
         W, H = input_pil.size
-        # Keep numpy version for CV operations
         input_rgb_np = np.array(input_pil)
 
-        # 2. Assess Quality (Simplified/Placeholder)
-        logging.info("2. Assessing image quality...") # Use logging
-        # Assuming basic checks or skipping detailed assessment for now
-        # quality_assessment = self.assessor.assess_quality(input_pil) # Original call
-        # print(f"Quality Assessment: {quality_assessment['message']}")
-        # if not quality_assessment['is_processable']:
-        #      print("Warning: Proceeding despite low quality assessment.")
-        logging.info("   Skipping detailed quality assessment.") # Use logging
+        # --- Assess Quality --- (Currently skipped)
+        logging.info("2. Assessing image quality...")
+        logging.info("   Skipping detailed quality assessment.")
 
-        # 3. Segment Foreground
-        logging.info("3. Segmenting foreground...") # Use logging
+        # --- Segment Foreground --- 
+        logging.info("3. Segmenting foreground...")
+        raw_mask_np: Optional[np.ndarray] = None
         try:
-            # Pass flags and config directly to segmenter
-            segmentation_params = {
-                'refine': refine_mask_flag,
-                'refinement_config': self.config, # Segmenter pulls needed keys
-                'save_intermediate': save_intermediate,
-                'intermediate_dir': intermediate_dir,
-                'output_basename': output_basename,
-            }
-            # Segment now takes numpy array and returns final numpy mask (raw or refined)
-            final_mask_np = self.segmenter.segment(input_rgb_np, return_rgba=False, **segmentation_params)
-            if final_mask_np is None: raise RuntimeError("Segmentation returned None.")
-            logging.info("   Segmentation complete.") # Use logging
+            # Segmenter now only returns the raw mask
+            raw_mask_np = self.segmenter.segment(
+                input_rgb_np, # Pass numpy array
+                save_intermediate=save_intermediate,
+                intermediate_dir=intermediate_dir,
+                output_basename=output_basename
+            )
+            if raw_mask_np is None: 
+                # Error should be logged in segmenter
+                raise RuntimeError("Segmentation returned None.")
+            logging.info("   Raw segmentation complete.")
         except Exception as e:
-            logging.error(f"Error during segmentation: {e}", exc_info=True) # Use logging
+            logging.error(f"Error during segmentation step: {e}", exc_info=True)
             return False
+        
+        # --- Filtering & Refinement Stage --- 
+        logging.info("4. Filtering and Refining Mask...")
+        final_mask_np = raw_mask_np # Start with raw mask
+        filter_passed = True
+        filter_reason = ""
+        
+        # --- Apply Configured Filters Sequentially ---
+        active_filters = []
+        
+        if self.config.get('apply_contour_filter', False):
+            active_filters.append(("Contour", filtering.filter_by_contour))
 
-        # 4. Feather Mask Edges (Optional)
+        if self.config.get('apply_contrast_filter', False):
+            active_filters.append(("Contrast", filtering.filter_by_contrast))
+
+        if self.config.get('apply_text_filter', False):
+             # Implementation skipped, but keep check if flag might be true
+             logging.debug("Text filter enabled in config but implementation skipped.")
+             # active_filters.append(("Text", filtering.filter_by_text_overlap))
+             
+        if self.config.get('apply_clutter_filter', False):
+             active_filters.append(("Clutter", filtering.filter_by_clutter))
+        # ----------------------------------------------
+        
+        logging.info(f"Active mask filters: {[name for name, _ in active_filters]}")
+
+        for filter_name, filter_func in active_filters:
+            try:
+                logging.debug(f"Applying {filter_name} filter...")
+                filter_passed, filter_reason = filter_func(input_rgb_np, final_mask_np, self.config)
+                if not filter_passed:
+                    logging.warning(f"Mask rejected by {filter_name} filter: {filter_reason}")
+                    break # Stop filtering on first failure
+                else:
+                    logging.debug(f"{filter_name} filter passed.")
+            except Exception as filter_e:
+                logging.error(f"Error during {filter_name} filtering: {filter_e}", exc_info=True)
+                filter_passed = False
+                filter_reason = f"Error in {filter_name} filter"
+                break
+
+        if not filter_passed:
+            logging.warning(f"Skipping image {image_path.name} due to failed mask filter ({filter_reason}).")
+            return False # Image rejected by filters
+        else:
+            logging.info("   Mask passed all active filters.")
+
+        # Apply Morphological Refinement (if enabled and filters passed)
+        if refine_mask_flag:
+            logging.info("   Applying morphological refinement...")
+            try:
+                final_mask_np = filtering.refine_morphological(final_mask_np, self.config)
+                logging.info("   Morphological refinement complete.")
+                # Save refined mask if requested (moved from Segmenter)
+                if save_intermediate and intermediate_dir:
+                    try:
+                        save_path = intermediate_dir / f"{output_basename}_mask_refined.png"
+                        save_image(Image.fromarray(final_mask_np), save_path)
+                        logging.info(f"Saved refined mask to {save_path}")
+                    except Exception as save_e:
+                        logging.error(f"Failed to save refined mask to {save_path}: {save_e}")
+            except Exception as refine_e:
+                logging.error(f"Error during morphological refinement: {refine_e}", exc_info=True)
+                return False # Treat refinement error as failure for now
+        else:
+            logging.info("   Skipping morphological refinement (disabled in config).")
+
+        # --- Feather Mask Edges --- (Now Step 5)
+        logging.info("5. Feathering mask edges (optional)...")
         if feather_amount > 0:
-            logging.info(f"4. Feathering mask edges (sigma={feather_amount})...") # Use logging
-            # Feathering needs float mask
+            # ... (existing feathering logic using final_mask_np) ...
+            logging.info(f"   Feathering mask edges (sigma={feather_amount})...")
             mask_float = final_mask_np.astype(np.float32) / 255.0
-            # Kernel size must be odd
             k_size = int(6 * feather_amount + 1)
             if k_size % 2 == 0: k_size += 1
             try:
                 feathered_mask_float = cv2.GaussianBlur(mask_float, (k_size, k_size), feather_amount)
-                # Convert back to uint8 for compositing
                 final_mask_np = (feathered_mask_float * 255).clip(0, 255).astype(np.uint8)
-                logging.info("   Mask feathering complete.") # Use logging
+                logging.info("   Mask feathering complete.")
             except Exception as e:
-                 logging.warning(f"Failed to feather mask: {e}. Using unfeathered mask.", exc_info=True) # Use logging
-                 # Fallback to the unfeathered mask if blur fails
-                 final_mask_np = final_mask_np
+                 logging.warning(f"Failed to feather mask: {e}. Using unfeathered mask.", exc_info=True)
+                 # Fallback handled by keeping final_mask_np as is
         else:
-             logging.info("4. Skipping mask edge feathering.") # Use logging
+             logging.info("   Skipping mask edge feathering.")
 
-        # Convert final mask to PIL (needed for diffusion? Check DiffusionGenerator usage)
+        # Convert final mask to PIL for diffusion generator 
         final_mask_pil = Image.fromarray(final_mask_np).convert('L')
 
-        # Create RGBA foreground numpy array using the final mask
+        # Create RGBA foreground (using final mask)
         foreground_rgba_np = cv2.cvtColor(input_rgb_np, cv2.COLOR_RGB2RGBA)
         foreground_rgba_np[:, :, 3] = final_mask_np
 
-        # 5. Prepare Background
-        logging.info(f"5. Preparing background... Spec: {background_spec}") # Use logging
+        # --- Prepare Background --- (Now Step 6)
+        logging.info(f"6. Preparing background... Spec: {background_spec}")
         background_rgb_np: Optional[np.ndarray] = None
         target_size = (W, H)
         bg_type = 'unknown'
@@ -382,7 +434,8 @@ class GenerationPipeline:
             logging.error(f"Error preparing background: {e}", exc_info=True) # Use logging
             return False
 
-        # 6. Add Shadow (Optional)
+        # --- Add Shadow --- (Now Step 7)
+        logging.info("7. Adding drop shadow (optional)...")
         foreground_with_shadow_np = foreground_rgba_np
         if add_shadow_flag:
             logging.info("6. Adding drop shadow...") # Use logging
@@ -405,8 +458,8 @@ class GenerationPipeline:
         else:
             logging.info("6. Skipping drop shadow.") # Use logging
 
-        # 7. Combine Final Foreground (with shadow) and Background
-        logging.info("7. Combining final layers...") # Use logging
+        # --- Combine Layers --- (Now Step 8)
+        logging.info("8. Combining final layers...")
         try:
             # Ensure background is also RGBA for consistent compositing
             if background_rgb_np.shape[2] == 3:
@@ -429,14 +482,14 @@ class GenerationPipeline:
             logging.error(f"Error combining layers: {e}", exc_info=True) # Use logging
             return False
 
-        # 8. Save Result
-        logging.info(f"8. Saving final image to: {output_path}") # Use logging
+        # --- Save Result --- (Now Step 9)
+        logging.info(f"9. Saving final image to: {output_path}")
         # Convert to RGB before saving unless transparency is desired (e.g., PNG)
         save_mode = 'RGBA' if output_path.suffix.lower() == '.png' else 'RGB'
         success = save_image(final_image_pil.convert(save_mode), output_path)
 
         end_time = time.time()
-        logging.info(f"--- Processing finished in {end_time - start_time:.2f} seconds. Success: {success} ---") # Use logging
+        logging.info(f"--- Processing finished in {end_time - start_time:.2f} seconds. Success: {success} ---")
         return success
 
 # --- Example Usage (for testing within the module) ---
