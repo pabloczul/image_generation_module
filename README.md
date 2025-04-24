@@ -14,20 +14,23 @@ The project has been refactored from initial scripts into a production-oriented 
 ## Features
 
 *   **Modular Architecture:** Codebase organized into logical components (segmentation, quality assessment, background generation, pipeline orchestration, utilities).
-*   **Foreground Segmentation:** Uses the `rembg` library (`u2net` model by default) to automatically isolate the foreground product.
+*   **Foreground Segmentation:** Uses the `rembg` library (`isnet-general-use` model by default) to automatically isolate the foreground product.
+*   **Advanced Mask Refinement:** 
+    * Configurable morphological operations including opening, closing, and dilation to improve segmentation quality
+    * Optional filtering for low contrast areas, scene clutter, and contour properties
 *   **Background Types:**
     *   **Solid Color:** Generate backgrounds with a specified RGB color.
     *   **Gradient:** Generate linear (vertical/horizontal) or radial gradient backgrounds.
     *   **Image File:** Use any existing image file as a background.
     *   **Diffusion (Optional):** Leverage Stable Diffusion with ControlNet (Inpainting + Segmentation/Canny) to generate context-aware backgrounds based on text prompts.
-*   **Image Quality Assessment:** Includes utilities to check input image resolution, blur, and contrast (currently simplified in main pipeline).
-*   **Configurable Mask Refinement:** Applies morphological opening and dilation (tunable kernel sizes/iterations via `src/config.py`) to improve the segmentation mask.
+*   **Image Quality Assessment:** Includes utilities to check input image resolution, blur, and contrast.
 *   **Configurable Edge Feathering:** Option to apply Gaussian blur to mask edges for smoother compositing (tunable sigma via `src/config.py`).
 *   **Configurable Drop Shadow:** Option to add a soft drop shadow with configurable offset, blur (sigma), opacity, and color via `src/config.py`.
 *   **Command-Line Interface:** Easy-to-use CLI (`scripts/generate.py`) for processing images.
 *   **Docker Support:** Includes `Dockerfile` for building and running the application in a containerized environment (CPU-based by default).
 *   **Configuration:** Centralized default settings in `src/config.py`.
 *   **Intermediate Mask Saving:** Optional flag (`--save-intermediate-masks` or via config) to save raw and refined masks for debugging.
+*   **Experimental Tools:** Additional scripts for testing and optimizing segmentation parameters.
 
 ## Project Structure
 
@@ -35,28 +38,25 @@ The project has been refactored from initial scripts into a production-oriented 
 ├── data/
 │   ├── images/          # Input product images
 │   ├── backgrounds/     # Generated/Downloaded background images
+│   ├── test_images/     # Test images for segmentation experiments
 │   └── metadata/        # CSV files or other metadata
-├── docs/                # Project documentation
 ├── notebooks/
 │   └── pipeline_demonstration.ipynb # Example usage notebook
 ├── results/
-│   ├── main_run_outputs/ # Default output dir for main.py
+│   ├── diffusion_run_outputs/ # Default output dir for diffusion results
 │   ├── intermediate_masks/ # Default output dir for intermediate masks
-│   └── notebook_demonstration/ # Default output dir for notebook
+│   └── seg_experiments_*/  # Results from segmentation experiments
 ├── scripts/
-│   ├── download_data.py # Script to download sample images/backgrounds
 │   └── generate.py      # Main CLI script for processing images
 ├── src/
 │   ├── __init__.py
 │   ├── background/      # Background generation/loading/utils
-│   ├── image/           # Segmentation, quality assessment
+│   ├── image/           # Segmentation, quality assessment, filtering
 │   ├── models/          # Diffusion model wrappers
 │   ├── pipeline/        # Main pipeline orchestration
 │   ├── utils/           # Data I/O, visualization
 │   └── config.py        # Configuration settings
 ├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
 │   ├── test_background/
 │   ├── test_image/
 │   ├── test_pipeline/
@@ -65,7 +65,7 @@ The project has been refactored from initial scripts into a production-oriented 
 ├── Dockerfile           # Defines the Docker image
 ├── main.py              # Example batch processing script
 ├── requirements.txt     # Python dependencies
-├── PROJECT_STATUS.md    # Detailed status tracking
+├── seg_experiments_main.py # Experiment orchestration for segmentation testing
 └── README.md            # This file
 ```
 
@@ -96,19 +96,14 @@ Follow these steps to set up the project locally.
     # Install general requirements
     pip install -r requirements.txt
 
-    # Install PyTorch (CPU example)
-    pip install torch==2.1.0+cpu torchvision==0.16.0+cpu torchaudio==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+    # Install PyTorch 
+    GPU support is needed for diffusion and future implementations with other advanced methods.
+    Here is an example installation that supports cuda 12.6 - it is required to have already installed cuda on device.
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
     # (For GPU, visit pytorch.org to find the correct command for your CUDA version)
     ```
 
-4.  **Download Sample Data (Optional):**
-    Run the download script to get sample product images and backgrounds.
-    ```bash
-    python scripts/download_data.py
-    # Use --skip_products or --skip_backgrounds if you only need one
-    ```
-
-5.  **Model Downloads (Automatic):**
+4.  **Model Downloads (Automatic):**
     The necessary `rembg` and `diffusers` models will be downloaded automatically on first use when running the pipeline (requires internet connection).
 
 ## Usage
@@ -136,7 +131,7 @@ python scripts/generate.py <input_image> -o <output_image> -bg <background_spec>
     *   JSON (Diffusion): `'{"type": "diffusion"}'` (Use with `-p` option)
     *   JSON (File): `'{"type": "file", "path": "data/backgrounds/image.png"}'`
 *   `-p <prompt>` / `--prompt <prompt>`: Optional text prompt for diffusion backgrounds.
-*   `--segmenter_model <model_name>`: Optional. Override segmentation model (e.g., `u2net`, `u2netp`, `silueta`). If not provided, uses the default from `src/config.py`.
+*   `--segmenter_model <model_name>`: Optional. Override segmentation model (e.g., `u2net`, `u2netp`, `silueta`, `isnet-general-use`). If not provided, uses the default from `src/config.py`.
 *   `--diffusion_cfg <json_string>`: Optional. JSON string with overrides for DiffusionGenerator settings (e.g., `'{"device": "cuda", "num_inference_steps": 50}'`). Merged with defaults from `src/config.py`.
 *   `--save-intermediate-masks`: Optional flag. If present, saves raw and refined masks to the directory specified by `intermediate_mask_dir` in `src/config.py`. Overrides the `save_intermediate_masks` setting in the config file.
 
@@ -150,24 +145,24 @@ python scripts/generate.py data/images/4447872.jpg -o results/output_solid.png -
 python scripts/generate.py data/images/4447872.jpg -o results/output_gradient.png -bg '{"type": "gradient", "colors": [[230,240,255],[200,210,230]]}' --save-intermediate-masks
 
 # Background from image file, override segmenter model
-python scripts/generate.py data/images/4447872.jpg -o results/output_filebg.jpg -bg data/backgrounds/wood_texture.jpg --segmenter_model silueta
+python scripts/generate.py data/images/4447872.jpg -o results/output_filebg.jpg -bg data/backgrounds/wood_texture.jpg --segmenter_model isnet-general-use
 
 # Diffusion background (if enabled/available)
-# python scripts/generate.py data/images/4447872.jpg -o results/output_diffusion.png -bg '{"type": "diffusion"}' -p "Minimalist light grey studio setting"
+python scripts/generate.py data/images/4447872.jpg -o results/output_diffusion.png -bg '{"type": "diffusion"}' -p "Minimalist light grey studio setting"
 ```
 
 ### Batch Processing Script
 
-The `main.py` script provides an example of processing all images in the `data/images` directory with both diffusion (if available) and gradient backgrounds. Edit the script if needed and run:
+The `main.py` script provides an example of processing all images in the `data/images` directory with diffusion backgrounds. Edit the script if needed and run:
 
 ```bash
 python main.py
 ```
-Outputs will be saved in `results/main_run_outputs/`.
+Outputs will be saved in `results/diffusion_run_outputs/`.
 
 ### Library Usage (Python/Notebooks)
 
-You can import and use the `GenerationPipeline` class directly in your Python scripts or notebooks. See `notebooks/pipeline_demonstration.ipynb` for detailed examples.
+You can import and use the `GenerationPipeline` class directly in your Python scripts or notebooks.
 
 ```python
 from src.pipeline.main_pipeline import GenerationPipeline
@@ -221,19 +216,43 @@ A `Dockerfile` is provided for building and running the application in a contain
 
 ## Configuration
 
-Default settings for the pipeline are defined in `src/config.py` (`DEFAULT_CONFIG` dictionary). You can modify this file directly for persistent changes, or provide overrides during `GenerationPipeline` initialization (library usage) or via specific CLI arguments (`scripts/generate.py`).
+Default settings for the pipeline are defined in `src/config.py` (`DEFAULT_CONFIG` dictionary). You can modify this file directly for persistent changes, or provide overrides during `GenerationPipeline` initialization (library usage) or via specific CLI arguments.
 
 Key configurable sections include:
 
 *   **Input Image Processing:** Minimum resolution checks, blur/contrast thresholds.
 *   **Segmentation:** Default `rembg` model (`segmenter_model`), device (`segmentation_device`).
-*   **Mask Refinement:** `refine_mask` (bool), `mask_opening_kernel_size`, `mask_opening_iterations`, `mask_dilation_kernel_size`, `mask_dilation_iterations`.
+*   **Mask Refinement:** 
+    * `refine_mask` (bool)
+    * `mask_opening_kernel_size`, `mask_opening_iterations` (remove small noise) 
+    * `mask_closing_kernel_size`, `mask_closing_iterations` (fill holes)
+    * `mask_dilation_kernel_size`, `mask_dilation_iterations` (expand mask)
+*   **Advanced Filtering:**
+    * `apply_contrast_filter`, `contrast_filter_threshold` (detect low-contrast areas)
+    * `apply_clutter_filter`, `clutter_min_primary_iou`, `clutter_max_other_overlap` (filter based on scene objects)
+    * `apply_contour_filter`, `contour_max_points`, `contour_max_count`, `contour_min_solidity` (analyze mask contours)
 *   **Compositing:** `add_shadow` (bool), `edge_feathering_amount` (Gaussian blur sigma for mask edges, 0 disables).
 *   **Shadow:** `shadow_offset_x`, `shadow_offset_y`, `shadow_blur_sigma` (softness), `shadow_opacity`, `shadow_color`.
 *   **Background Generation:** Default settings for diffusion models (`diffusion_model_id`, `diffusion_controlnet_model_id`, `diffusion_device`, inference steps, scales).
 *   **Output:** Default output directories (`default_output_dir`, `intermediate_mask_dir`), `save_intermediate_masks` (bool, can be overridden by CLI flag).
 
-*(Note: Loading configuration from external YAML/JSON files is planned but not yet implemented in `src.config.load_config`)*.
+## Segmentation Experimentation
+
+The project includes tooling for experimenting with segmentation parameters to find optimal settings for your specific use case:
+
+1. **Experiment Runner:** `seg_experiments_main.py` automates testing various segmentation parameters
+2. **Parameter Grid Configuration:** The script allows creating a grid of parameters to test, including:
+   * Segmentation models (u2net, isnet-general-use, etc.)
+   * Mask refinement settings (opening, closing, dilation)
+   * Filtering thresholds (contrast, clutter, contour)
+   * Feathering amounts
+
+To run segmentation experiments:
+```bash
+python seg_experiments_main.py
+```
+
+The results will be saved in a structured directory under `results/seg_experiments_*/` for comparative analysis.
 
 ## Testing
 

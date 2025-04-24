@@ -185,8 +185,8 @@ def filter_by_clutter(image_np: np.ndarray, mask_np: np.ndarray, config: Dict[st
         Tuple[bool, str]: (True, "Clutter check passed") or (False, "Reason for rejection").
     """
     model_name = config.get('clutter_detector_model', 'yolov8n.pt')
-    min_iou_primary = config.get('clutter_min_primary_iou', 0.5)
-    max_overlap_other = config.get('clutter_max_other_overlap', 0.2)
+    min_iou_primary = config.get('clutter_min_primary_iou', 0.4)
+    max_overlap_other = config.get('clutter_max_other_overlap', 0.3)
     conf_threshold = config.get('clutter_confidence_threshold', 0.25) # YOLO default
 
     # --- Dependency Check --- 
@@ -329,9 +329,9 @@ def filter_by_contour(image_np: np.ndarray, mask_np: np.ndarray, config: Dict[st
     Returns:
         Tuple[bool, str]: (True, "Contour properties acceptable") or (False, "Reason for rejection").
     """
-    max_points = config.get('contour_max_points', 5000)
-    max_count = config.get('contour_max_count', 10)
-    min_solidity = config.get('contour_min_solidity', 0.80)
+    max_count = config.get('contour_max_count', 5)
+    max_points = config.get('contour_max_points', 2500)
+    min_solidity = config.get('contour_min_solidity', 0.70)
     min_area_ratio = config.get('contour_min_area_ratio', 0.01) # 1% of image area
     max_area_ratio = config.get('contour_max_area_ratio', 0.95) # 95% of image area
 
