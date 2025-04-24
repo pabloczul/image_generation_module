@@ -1,6 +1,6 @@
 # Use an official Python runtime as a parent image
 # Using slim-buster for a smaller image size
-FROM python:3.10-slim-buster
+FROM nvidia/cuda:12.6.0-base-ubuntu24.04
 
 # Set environment variables
 # Prevents Python from writing pyc files to disc (optional)

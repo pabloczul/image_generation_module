@@ -31,9 +31,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "refine_mask": True,                # Apply morphological refinement?
     # Mask refinement parameters (applied if refine_mask is True)
     "mask_opening_kernel_size": 3,      # Kernel size for morphological opening (removes noise, must be positive odd)
-    "mask_opening_iterations": 2,       # Iterations for opening
-    "mask_closing_kernel_size": 10,      # Kernel size for morphological closing (fills holes, must be positive odd, 0 to disable)
-    "mask_closing_iterations": 20,       # Iterations for closing
+    "mask_opening_iterations": 1,       # Iterations for opening
+    "mask_closing_kernel_size": 5,      # Kernel size for morphological closing (fills holes, must be positive odd, 0 to disable)
+    "mask_closing_iterations": 2,       # Iterations for closing
     "mask_dilation_kernel_size": 1,     # Kernel size for morphological dilation (expands mask, must be positive odd)
     "mask_dilation_iterations": 1,      # Iterations for dilation
 
@@ -69,12 +69,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "text_overlap_threshold": 0.1,      # Example threshold (10% overlap)
     "apply_clutter_filter": False,        # Enable clutter filter?
     "clutter_detector_model": "yolov8n.pt",# Example YOLO model 
-    "clutter_min_primary_iou": 0.5,     # Example threshold (50% IoU)
-    "clutter_max_other_overlap": 0.2,   # Example threshold (20% overlap)
+    "clutter_min_primary_iou": 0.4,     # Example threshold (40% IoU)
+    "clutter_max_other_overlap": 0.3,   # Example threshold (30% overlap)
     "apply_contour_filter": False,        # Enable contour property filter?
-    "contour_max_points": 2000,         # Example threshold 
+    "contour_max_points": 2500,         # Example threshold 
     "contour_max_count": 5,             # Example threshold
-    "contour_min_solidity": 0.8,        # Example threshold
+    "contour_min_solidity": 0.7,        # Example threshold
     # -----------------------------------
 
     # --- Output ---
