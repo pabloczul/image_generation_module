@@ -187,7 +187,7 @@ def filter_by_clutter(image_np: np.ndarray, mask_np: np.ndarray, config: Dict[st
     model_name = config.get('clutter_detector_model', 'yolov8n.pt')
     min_iou_primary = config.get('clutter_min_primary_iou', 0.4)
     max_overlap_other = config.get('clutter_max_other_overlap', 0.3)
-    conf_threshold = config.get('clutter_confidence_threshold', 0.25) # YOLO default
+    conf_threshold = config.get('clutter_confidence_threshold', 0.5) # Default 50% confidence threshold
 
     # --- Dependency Check --- 
     try:
@@ -296,7 +296,7 @@ def filter_by_clutter(image_np: np.ndarray, mask_np: np.ndarray, config: Dict[st
                     total_other_intersection += intersection_with_other
                     # logging.debug(f"Overlap with non-primary obj {i}: {intersection_with_other} pixels")
             
-            mask_overlap_ratio_total = total_other_intersection / mask_area if mask_area > 0 else 0
+            mask_overlap_ratio_total = 1 - (total_other_intersection / mask_area if mask_area > 0 else 0)
             logging.debug(f"Clutter filter: Total intersection with non-primary objects: {total_other_intersection} pixels, Mask area: {mask_area}, Overlap Ratio: {mask_overlap_ratio_total:.3f}")
             
             if mask_overlap_ratio_total > max_overlap_other:
